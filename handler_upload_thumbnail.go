@@ -1,8 +1,11 @@
 package main
 
 import (
+	"crypto/rand"
+	"encoding/base64"
 	"fmt"
 	"io"
+	"log"
 	"mime"
 	"net/http"
 	"os"
@@ -38,8 +41,13 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	nameBytes := make([]byte, 32)
+	rand.Read(nameBytes)
+	videoFileName := base64.RawURLEncoding.EncodeToString(nameBytes)
+
 	const maxMemory = 10 << 20
 	r.ParseMultipartForm(maxMemory)
+	log.Printf("Here is the base64 string: %v", videoFileName)
 
 	token, err := auth.GetBearerToken(r.Header)
 	if err != nil {
@@ -56,7 +64,7 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 	fileType := strings.SplitN(contentType, "/", 2)
 
 	fmt.Println(contentType)
-	fileName := fmt.Sprintf("%v.%v", videoIDString, fileType[1])
+	fileName := fmt.Sprintf("%v.%v", videoFileName, fileType[1])
 	fp := filepath.Join(cfg.assetsRoot, fileName )
 	thumbnailFile, _ := os.Create(fp)
 	io.Copy(thumbnailFile, file)
@@ -74,14 +82,13 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 		respondWithError(w, http.StatusUnauthorized, "Not authorized", err)
 	}
 
-	fileURL := fmt.Sprintf("http://localhost%v/assets/%v", cfg.port, fileName)
+	fileURL := fmt.Sprintf("http://localhost:%v/assets/%v", cfg.port, fileName)
 	videoMetadata.ThumbnailURL = &fileURL
 	if err := cfg.db.UpdateVideo(videoMetadata); err != nil {
 		respondWithError(w, 403, "could not update metadata", err)
 		return
 	}
-	
-	fmt.Println("uploading thumbnail for video", videoID, "by user", userID)
+	fmt.Println("uploading thumbnail for video", videoID, "by user", userID, "with URL", fileURL)
 
 	respondWithJSON(w, http.StatusOK, videoMetadata)
 }

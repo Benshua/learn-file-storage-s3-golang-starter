@@ -1,8 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
 	"net/http"
+	"os/exec"
 
 	"github.com/bootdotdev/learn-file-storage-s3-golang-starter/internal/auth"
 	"github.com/bootdotdev/learn-file-storage-s3-golang-starter/internal/database"
@@ -117,4 +120,39 @@ func (cfg *apiConfig) handlerVideosRetrieve(w http.ResponseWriter, r *http.Reque
 	}
 
 	respondWithJSON(w, http.StatusOK, videos)
+}
+
+func getVideoAspectRatio(filepath string) (string, error) {
+
+	cmd := exec.Command("/usr/bin/ffprobe", "-v", "error", "-print_format", "json", "-show_streams", filepath)
+	var b bytes.Buffer
+	cmd.Stdout = &b
+
+	if err := cmd.Run(); err != nil {
+		return "", err
+	}
+	
+	type arStruct struct {
+			Streams[] struct {
+				Width int `json:"coded_width"`
+				Height int `json:"coded_height"`
+			} `json:"streams"`
+		}
+	
+	var ar arStruct
+	if err := json.Unmarshal(b.Bytes(), &ar); err != nil {
+		return "", err
+	}
+
+	if len(ar.Streams) == 0 {
+    return "", errors.New("no streams found")
+	}
+
+	w := ar.Streams[0].Width
+	h := ar.Streams[0].Height
+
+	if w > h { return "landscape", nil }
+	if w < h { return "portrait", nil }
+
+	return "other", nil
 }
