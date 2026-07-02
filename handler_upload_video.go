@@ -79,44 +79,60 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	defer os.Remove(tempF.Name())
-	defer tempF.Close()
-
-
-
 	io.Copy(tempF, videoData)
 	tempF.Seek(0, io.SeekStart)
+
+		processedPath, err := processVideoForFastStart(tempF.Name())
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "an error occured encoding fast-start: %v", err)
+		return
+	}
+
+	processedFile, err := os.Open(processedPath)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Could not get processed file path: %v", err)
+		return	
+	}
+
+	defer os.Remove(tempF.Name())
+	defer tempF.Close()
 
 	b := make([]byte, 32)
 	rand.Read(b)
 
-	ar, err := getVideoAspectRatio(tempF.Name())
+	ar, err := getVideoAspectRatio(processedFile.Name())
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Failed to fetch aspect ratio", err)
 		return
 	}
 
-	vF := fmt.Sprintf("%v/%v.%v", ar, hex.EncodeToString(b), contentExt[1])
+	defer os.Remove(processedFile.Name())
+	defer processedFile.Close()
+
+	vF := fmt.Sprintf("%v%v.%v", ar, hex.EncodeToString(b), contentExt[1])
 
 	cfg.s3Client.PutObject(
 		context.TODO(),
 		&s3.PutObjectInput{
 			Bucket: &cfg.s3Bucket,
 			Key: &vF,
-			Body: tempF,
+			Body: processedFile,
 			ContentType: &contentType,
 		},
 	)
 
-	videoURL := fmt.Sprintf("https://%s.s3.%s.amazonaws.com/%s", cfg.s3Bucket, cfg.s3Region, vF)
+	videoURL := fmt.Sprintf("%s,%s", cfg.s3Bucket, vF)
+
 	video.VideoURL = &videoURL
 	if err := cfg.db.UpdateVideo(video); err != nil {
 		respondWithError(w, 403, "could not upload video", err)
 		return
 	}
+	signedVideo, _ := cfg.dbVideoToSignedVideo(video)
+
 	fmt.Println("uploading thumbnail for video", videoID, "by user", userID, "with URL", videoURL)
 	log.Printf("uploading file with URL: %s", videoURL)
 
-	respondWithJSON(w, http.StatusOK, video)
+	respondWithJSON(w, http.StatusOK, signedVideo)
 
 }

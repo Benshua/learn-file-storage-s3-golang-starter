@@ -4,8 +4,12 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"log"
 	"net/http"
 	"os/exec"
+	"strings"
+	"time"
 
 	"github.com/bootdotdev/learn-file-storage-s3-golang-starter/internal/auth"
 	"github.com/bootdotdev/learn-file-storage-s3-golang-starter/internal/database"
@@ -93,12 +97,13 @@ func (cfg *apiConfig) handlerVideoGet(w http.ResponseWriter, r *http.Request) {
 	}
 
 	video, err := cfg.db.GetVideo(videoID)
+	signedVideo, _ := cfg.dbVideoToSignedVideo(video)
 	if err != nil {
 		respondWithError(w, http.StatusNotFound, "Couldn't get video", err)
 		return
 	}
 
-	respondWithJSON(w, http.StatusOK, video)
+	respondWithJSON(w, http.StatusOK, signedVideo)
 }
 
 func (cfg *apiConfig) handlerVideosRetrieve(w http.ResponseWriter, r *http.Request) {
@@ -112,14 +117,23 @@ func (cfg *apiConfig) handlerVideosRetrieve(w http.ResponseWriter, r *http.Reque
 		respondWithError(w, http.StatusUnauthorized, "Couldn't validate JWT", err)
 		return
 	}
-
+	
 	videos, err := cfg.db.GetVideos(userID)
+
+	signedVideos := make([]database.Video, len(videos))
+	for i, video := range videos {
+		signed, err := cfg.dbVideoToSignedVideo(video)
+		if err != nil {
+			// handle error
+		}
+		signedVideos[i] = signed
+	}
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Couldn't retrieve videos", err)
 		return
 	}
 
-	respondWithJSON(w, http.StatusOK, videos)
+	respondWithJSON(w, http.StatusOK, signedVideos)
 }
 
 func getVideoAspectRatio(filepath string) (string, error) {
@@ -155,4 +169,44 @@ func getVideoAspectRatio(filepath string) (string, error) {
 	if w < h { return "portrait", nil }
 
 	return "other", nil
+}
+
+
+func processVideoForFastStart(filepath string) (string, error) {
+	log.Println(filepath)
+	fPString := fmt.Sprintf("%s.processing", filepath)
+	log.Println(fPString)
+	cmd := exec.Command("/usr/bin/ffmpeg", 
+						"-i", filepath, "-c", "copy", "-movflags", 
+						"faststart", "-f", "mp4", fPString,
+					)
+		
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("ffmpeg error: %s, %v", stderr.String(), err)
+	}
+
+	return fPString, nil
+
+}
+
+func (cfg *apiConfig) dbVideoToSignedVideo(video database.Video) (database.Video, error) {
+	if video.VideoURL == nil {
+    	return video, nil
+	}
+
+	videoURL := video.VideoURL
+	log.Printf("new video URL: %v",video)
+	splitVU := strings.SplitN(*videoURL, ",", 2)
+
+	psURL, err := generatePresignedURL(cfg.s3Client, splitVU[0], splitVU[1], 5*time.Minute)
+	if err != nil {	
+		return video, fmt.Errorf("Failed to generate presigned URL: %v", err)
+	}
+
+	video.VideoURL = &psURL
+	log.Printf("presigned URL: %v", psURL)
+	return video, err
+	
 }
