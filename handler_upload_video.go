@@ -109,7 +109,7 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 	defer os.Remove(processedFile.Name())
 	defer processedFile.Close()
 
-	vF := fmt.Sprintf("%v%v.%v", ar, hex.EncodeToString(b), contentExt[1])
+	vF := fmt.Sprintf("%v/%v.%v", ar, hex.EncodeToString(b), contentExt[1])
 
 	cfg.s3Client.PutObject(
 		context.TODO(),
@@ -121,18 +121,17 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 		},
 	)
 
-	videoURL := fmt.Sprintf("%s,%s", cfg.s3Bucket, vF)
+	videoURL := fmt.Sprintf("https://%s/%s", cfg.s3CfDistribution, vF)
 
 	video.VideoURL = &videoURL
 	if err := cfg.db.UpdateVideo(video); err != nil {
 		respondWithError(w, 403, "could not upload video", err)
 		return
 	}
-	signedVideo, _ := cfg.dbVideoToSignedVideo(video)
 
 	fmt.Println("uploading thumbnail for video", videoID, "by user", userID, "with URL", videoURL)
 	log.Printf("uploading file with URL: %s", videoURL)
 
-	respondWithJSON(w, http.StatusOK, signedVideo)
+	respondWithJSON(w, http.StatusOK, video)
 
 }

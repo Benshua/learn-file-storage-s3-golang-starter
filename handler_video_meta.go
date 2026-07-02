@@ -8,8 +8,6 @@ import (
 	"log"
 	"net/http"
 	"os/exec"
-	"strings"
-	"time"
 
 	"github.com/bootdotdev/learn-file-storage-s3-golang-starter/internal/auth"
 	"github.com/bootdotdev/learn-file-storage-s3-golang-starter/internal/database"
@@ -97,13 +95,12 @@ func (cfg *apiConfig) handlerVideoGet(w http.ResponseWriter, r *http.Request) {
 	}
 
 	video, err := cfg.db.GetVideo(videoID)
-	signedVideo, _ := cfg.dbVideoToSignedVideo(video)
 	if err != nil {
 		respondWithError(w, http.StatusNotFound, "Couldn't get video", err)
 		return
 	}
 
-	respondWithJSON(w, http.StatusOK, signedVideo)
+	respondWithJSON(w, http.StatusOK, video)
 }
 
 func (cfg *apiConfig) handlerVideosRetrieve(w http.ResponseWriter, r *http.Request) {
@@ -120,20 +117,7 @@ func (cfg *apiConfig) handlerVideosRetrieve(w http.ResponseWriter, r *http.Reque
 	
 	videos, err := cfg.db.GetVideos(userID)
 
-	signedVideos := make([]database.Video, len(videos))
-	for i, video := range videos {
-		signed, err := cfg.dbVideoToSignedVideo(video)
-		if err != nil {
-			// handle error
-		}
-		signedVideos[i] = signed
-	}
-	if err != nil {
-		respondWithError(w, http.StatusInternalServerError, "Couldn't retrieve videos", err)
-		return
-	}
-
-	respondWithJSON(w, http.StatusOK, signedVideos)
+	respondWithJSON(w, http.StatusOK, videos)
 }
 
 func getVideoAspectRatio(filepath string) (string, error) {
@@ -189,24 +173,4 @@ func processVideoForFastStart(filepath string) (string, error) {
 
 	return fPString, nil
 
-}
-
-func (cfg *apiConfig) dbVideoToSignedVideo(video database.Video) (database.Video, error) {
-	if video.VideoURL == nil {
-    	return video, nil
-	}
-
-	videoURL := video.VideoURL
-	log.Printf("new video URL: %v",video)
-	splitVU := strings.SplitN(*videoURL, ",", 2)
-
-	psURL, err := generatePresignedURL(cfg.s3Client, splitVU[0], splitVU[1], 5*time.Minute)
-	if err != nil {	
-		return video, fmt.Errorf("Failed to generate presigned URL: %v", err)
-	}
-
-	video.VideoURL = &psURL
-	log.Printf("presigned URL: %v", psURL)
-	return video, err
-	
 }
